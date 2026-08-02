@@ -1,11 +1,12 @@
 import type { DetectionEvent } from "./types";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001/api/events";
-const POLL_INTERVAL_MS = 1000;
+// Tightened from 1000ms (Sprint 2) per DEMO_SPEC.md §4a's Sprint 7
+// micro-flicker requirement — frequent enough for HUD values to visibly
+// tick rather than step once a second.
+const POLL_INTERVAL_MS = 400;
 
-// Polls the backend and reports each response. Sprint 2 only needs to
-// confirm connectivity — the callback isn't wired into the HUD/scene
-// until Sprint 3.
+// Polls the backend and reports each response.
 export function pollEvents(
   onUpdate: (event: DetectionEvent) => void,
   intervalMs: number = POLL_INTERVAL_MS,

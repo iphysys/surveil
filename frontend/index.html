@@ -6,7 +6,46 @@
     <title>surveil — simulated detection feed</title>
   </head>
   <body>
-    <div id="app"></div>
+    <div class="page">
+      <section class="hero-frame" id="hero-frame">
+        <div id="app"></div>
+      </section>
+
+      <section class="info-section">
+        <div class="info-heading-row">
+          <h2>What this shows</h2>
+          <span class="placeholder-marker">placeholder copy</span>
+        </div>
+        <p>
+          A scripted, fully synthetic intruder-detection scenario: a subject
+          enters a monitored zone, gets flagged, escalates, then resolves —
+          looping continuously. Nothing here comes from a real camera, radar,
+          or sensor.
+        </p>
+      </section>
+
+      <section class="info-section">
+        <div class="info-heading-row">
+          <h2>How it works</h2>
+          <span class="placeholder-marker">placeholder copy</span>
+        </div>
+        <p>
+          A small backend server advances through a fixed timeline and
+          exposes the current detection event over HTTP. The frontend polls
+          that feed and drives the scene and HUD directly from it — colors,
+          pulse rate, and ring timing all come from the same synthetic event,
+          never an independent animation clock. All data is synthetic.
+        </p>
+      </section>
+
+      <section class="info-section">
+        <div class="info-heading-row">
+          <h2>About</h2>
+          <span class="placeholder-marker">placeholder copy</span>
+        </div>
+        <p>Demo asset by iPhySys Labs. Not a product; no capability claims.</p>
+      </section>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
