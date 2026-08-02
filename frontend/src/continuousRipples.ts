@@ -15,11 +15,27 @@ import { CONTINUOUS_PULSE_HEX } from "./palette";
 // repeats. Each sphere also spins about its own vertical axis while it's
 // alive, per explicit request.
 //
-// Sites 1-4 grow-while-fading over a shared LIFE_S. Site 0 (outer) is a
-// special case per explicit request: it keeps growing, without fading,
-// until the innermost site (4) has spawned — only then does it hold its
-// radius and start fading out. See OUTER_GROW_DURATION_S/
-// OUTER_FADE_DURATION_S below.
+// Every pulse grows continuously, at the same constant rate, for its
+// entire life — right up until the instant it's fully faded away and
+// removed, never freezing at a fixed size first — per explicit request.
+// Sites 1-4 fade from the moment they spawn (their whole life is the
+// fade). Site 0 (outer) is a special case per explicit request: it stays
+// at full opacity — still growing throughout — for a hold phase, then
+// fades out, continuing to grow as it does.
+//
+// The hold/fade split for site 0 was retimed (from an original
+// hold-until-innermost-spawns, ~7s total life) per explicit request: the
+// outer sphere must be FULLY faded away — not just starting to fade — by
+// the time the SECOND-innermost site (index 3) spawns. Re-timed the whole
+// cascade around that constraint rather than patching site 0 in
+// isolation: site 0's total life is now exactly 3 * STAGGER_S (matching
+// when site 3 spawns), split into a 2*STAGGER_S hold (ending when site 2,
+// the middle site, spawns) and a 1*STAGGER_S fade (ending exactly when
+// site 3 spawns) — both milestones tied to real spawn events, not
+// arbitrary fractions. That total (3s at the current STAGGER_S) happens
+// to already equal sites 1-4's own LIFE_S, so every one of the 5 pulses
+// now shares the same 3s total lifespan — a deliberate, coherent
+// re-timing, not a coincidence left unexamined.
 const SITE_COUNT = 5;
 // Fractions of `deathRadius`, outer → inner — evenly spaced concentric
 // anchors. Spacing widened from 0.1 to 0.15 of deathRadius per site (a
@@ -27,30 +43,32 @@ const SITE_COUNT = 5;
 // scaled up uniformly from the previous [0.5, 0.4, 0.3, 0.2, 0.1] rather
 // than just pushing the outermost further out, so every gap grows evenly.
 const SITE_FRACTIONS = [0.75, 0.6, 0.45, 0.3, 0.15];
-// How far each site's sphere grows beyond its own site radius, as a
-// fraction of deathRadius — kept proportional (90%) to the gap between
-// adjacent sites (now 0.15 * deathRadius) so sites still read as distinct
-// pulses, not one blur.
-const GROWTH_FRACTION = 0.135;
-const LIFE_S = 3.0; // grow+fade duration, shared by sites 1-4 (not the outer site — see below)
-// Slowed twice per explicit request ("rotate slowly", then "even more") —
-// decoupled from LIFE_S (which would complete a full showy spin every
-// 3s); a pulse now only turns a sliver of a full rotation before it
-// fades, reading as a near-imperceptible drift rather than a spin.
-const ROTATION_PERIOD_S = 30.0;
+// Growth speed, as a fraction of deathRadius grown per second — shared by
+// every site/pulse, applied continuously for as long as the pulse lives.
+// Raised from the previous fixed-amount model's implied rate (0.135
+// deathRadius-fractions over 3s ≈ 0.045/s) to 0.055/s (~22% faster) per
+// explicit request ("increase the rate of growth... a bit"). Because
+// growth no longer stops at a fixed target, sites 1-4 now grow slightly
+// past their old endpoint before fading away (a bit more overlap between
+// adjacent sites than before) — an accepted side effect of switching to
+// "grow the whole time," not separately re-tuned.
+const GROWTH_RATE_FRACTION_PER_S = 0.055;
+const LIFE_S = 3.0; // total life (spawn to fully faded) for sites 1-4
+// Slowed three times now per explicit request ("rotate slowly", "even
+// more", then "reduce... again") — decoupled from LIFE_S; a pulse only
+// turns a sliver of a full rotation before it fades, reading as a
+// near-imperceptible drift rather than a spin.
+const ROTATION_PERIOD_S = 45.0;
 const ROTATION_RAD_S = (Math.PI * 2) / ROTATION_PERIOD_S;
 const STAGGER_S = 1.0; // time between successive site spawns, outer first
 const PERIOD_S = SITE_COUNT * STAGGER_S; // the full cascade repeats on this period
 // The outermost site (index 0) is a special case per explicit request: it
-// keeps growing (no fade) until the innermost site (index 4) spawns, then
-// holds its radius and fades out — rather than fading on its own fixed
-// LIFE_S like every other site. OUTER_GROW_DURATION_S is exactly the time
-// from the outer site's own spawn to the innermost site's spawn (4
-// stagger-intervals later); OUTER_FADE_DURATION_S reuses LIFE_S as the
-// fade-only duration once growth stops, since no specific fade length was
-// given ("adjust the timing accordingly").
-const OUTER_GROW_DURATION_S = (SITE_COUNT - 1) * STAGGER_S;
-const OUTER_FADE_DURATION_S = LIFE_S;
+// stays at full opacity (still growing) until site 2 (the middle site)
+// spawns, then fades out over exactly one more stagger-interval — finishing
+// precisely when site 3 (the second-innermost) spawns, per explicit
+// request. Rather than fading from the moment it spawns like sites 1-4.
+const OUTER_HOLD_DURATION_S = (SITE_COUNT - 3) * STAGGER_S; // until site 2 spawns
+const OUTER_FADE_DURATION_S = STAGGER_S; // finishes exactly when site 3 spawns
 const OPACITY_START = 0.35; // subtler than the alert ripples' 0.6 — this is ambient, not an event
 // The lower hemisphere (toward the floor, from this fixed downward-
 // looking camera) reads fainter than the upper one — approximates "faint
@@ -102,7 +120,6 @@ interface Pulse {
   lowerMesh: THREE.LineSegments;
   lowerMaterial: THREE.LineBasicMaterial;
   startRadius: number;
-  endRadius: number;
   age: number;
 }
 
@@ -118,6 +135,8 @@ export function createContinuousRipples(
   const group = new THREE.Group();
   group.position.copy(position);
 
+  const growthRate = GROWTH_RATE_FRACTION_PER_S * deathRadius; // units/s
+
   const pulses: Pulse[] = [];
   let elapsedS = 0;
   // Site i first spawns at i * STAGGER_S, then again every PERIOD_S after that.
@@ -125,7 +144,6 @@ export function createContinuousRipples(
 
   function spawnAt(siteIndex: number): void {
     const startRadius = SITE_FRACTIONS[siteIndex] * deathRadius;
-    const endRadius = startRadius + GROWTH_FRACTION * deathRadius;
 
     const upperMaterial = new THREE.LineBasicMaterial({
       color: COLOR,
@@ -149,16 +167,7 @@ export function createContinuousRipples(
     upperMesh.scale.setScalar(startScale);
     lowerMesh.scale.setScalar(startScale);
     group.add(upperMesh, lowerMesh);
-    pulses.push({
-      siteIndex,
-      upperMesh,
-      upperMaterial,
-      lowerMesh,
-      lowerMaterial,
-      startRadius,
-      endRadius,
-      age: 0,
-    });
+    pulses.push({ siteIndex, upperMesh, upperMaterial, lowerMesh, lowerMaterial, startRadius, age: 0 });
   }
 
   function removePulse(index: number): void {
@@ -183,39 +192,32 @@ export function createContinuousRipples(
       const pulse = pulses[i];
       pulse.age += deltaSeconds;
 
-      let radius: number;
       let fadeFraction: number; // 1 = full opacity, 0 = fully faded
 
       if (pulse.siteIndex === 0) {
-        // Outer site: grow only (no fade) until the innermost site has
-        // spawned, then hold radius and fade out — per explicit request.
-        if (pulse.age < OUTER_GROW_DURATION_S) {
-          radius = THREE.MathUtils.lerp(
-            pulse.startRadius,
-            pulse.endRadius,
-            pulse.age / OUTER_GROW_DURATION_S,
-          );
+        // Outer site: full opacity (still growing) until site 2 spawns,
+        // then fades — fully gone by the time site 3 spawns, continuing
+        // to grow throughout.
+        if (pulse.age < OUTER_HOLD_DURATION_S) {
           fadeFraction = 1;
         } else {
-          const fadeAge = pulse.age - OUTER_GROW_DURATION_S;
+          const fadeAge = pulse.age - OUTER_HOLD_DURATION_S;
           if (fadeAge >= OUTER_FADE_DURATION_S) {
             removePulse(i);
             continue;
           }
-          radius = pulse.endRadius;
           fadeFraction = 1 - fadeAge / OUTER_FADE_DURATION_S;
         }
       } else {
-        // Sites 1-4: unchanged — grow-while-fading over the shared LIFE_S.
+        // Sites 1-4: fading (and growing) from the moment they spawn.
         if (pulse.age >= LIFE_S) {
           removePulse(i);
           continue;
         }
-        const t = pulse.age / LIFE_S;
-        radius = THREE.MathUtils.lerp(pulse.startRadius, pulse.endRadius, t);
-        fadeFraction = 1 - t;
+        fadeFraction = 1 - pulse.age / LIFE_S;
       }
 
+      const radius = pulse.startRadius + growthRate * pulse.age;
       const rotationStep = ROTATION_RAD_S * deltaSeconds;
 
       pulse.upperMesh.scale.setScalar(radius);

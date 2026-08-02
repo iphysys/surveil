@@ -18,11 +18,13 @@ import { SUBJECT_HEIGHT } from "./subject";
 //
 // The floor is a rectangle, not a square: GROUND_SIZE_X (the edge running
 // back-corner-to-right-corner, and its parallel front-to-left edge) was
-// lengthened from the original 12-unit square per explicit request;
-// GROUND_SIZE_Z (the other pair of edges) is unchanged. No exact target
-// length was given — 18 (50% longer) was a tuned choice, flagged here.
+// lengthened from the original 12-unit square per explicit request — no
+// exact target length was given, 18 (50% longer) was a tuned choice.
+// GROUND_SIZE_Z (the edge running back-corner-to-LEFT-corner, and its
+// parallel front-to-right edge) was later lengthened too, by an explicit
+// 20%: 12 → 14.4.
 export const GROUND_SIZE_X = 18;
-export const GROUND_SIZE_Z = 12;
+export const GROUND_SIZE_Z = 14.4;
 // Dot spacing is derived from GROUND_SIZE_Z at a baseline density, then
 // applied uniformly along X too (rather than a fixed index count) so the
 // grid reads as evenly spaced dots on a rectangle, not a stretched square

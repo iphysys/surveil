@@ -757,3 +757,89 @@ Verification:
 - Camera: escalated-state screenshot confirms a visibly tighter frame — the sphere cluster now fills noticeably more of the canvas — consistent with the ~15% distance reduction; the numeric NDC sweep already established the front-corner overshoot is small, not a large clip.
 
 Remaining manual steps: none. Dev servers still running — http://localhost:5173/ / http://localhost:3001.
+
+### 2026-08-03 — Pulse spheres: faster continuous growth (never freezes) + slower rotation
+
+Three-part request: (1) increase the pulse spheres' growth rate a bit; (2) let them keep growing all the way until they've fully faded away, rather than the outer sphere freezing its radius during its fade phase (introduced two entries ago); (3) further reduce rotation speed.
+
+This meant replacing the fixed-`endRadius`-then-freeze model with a genuinely continuous one: every pulse now grows at a constant rate for its *entire* life, with no separate "stop growing" point — opacity fading is a fully independent schedule layered on top, not tied to a radius target anymore.
+
+Files touched:
+- `frontend/src/continuousRipples.ts` — rewritten: `GROWTH_FRACTION` (a fixed total-growth-amount constant) replaced with `GROWTH_RATE_FRACTION_PER_S = 0.055` (a per-second rate, ~22% faster than the previous fixed model's implied rate of `0.135/3.0 ≈ 0.045/s`); `Pulse` no longer stores `endRadius` — every frame, `radius = startRadius + growthRate * age` for as long as the pulse is alive, full stop. For site 0 (outer), the old "freeze radius once the hold period ends" branch was removed — it still becomes eligible to fade at the same point (`OUTER_HOLD_DURATION_S = 4.0s`, renamed from `OUTER_GROW_DURATION_S` since growth is no longer distinct from what happens after), but radius keeps climbing at the same rate straight through the fade too, right up until removal at `OUTER_HOLD_DURATION_S + OUTER_FADE_DURATION_S ≈ 7s`. `ROTATION_PERIOD_S` 30.0 → 45.0.
+- `DEMO_SPEC.md` — Continuous scanning pulse subsection updated: growth described as a continuous rate rather than a bounded amount; outer site's bullet explains it grows for its whole ~7s life (not just the first 4s) and so ends up considerably larger than the other sites by design; rotation bullet's target updated to ~45s per rotation
+
+Decisions flagged (no exact numbers given beyond "a bit" / "reduce"):
+- Growth rate bump (~22%, chosen to read as "a bit" faster without being dramatic) and rotation period (45s, a further ~50% slowdown from 30s) were both tuned choices.
+- Because growth no longer stops at a fixed `endRadius`, sites 1-4 now grow slightly past where they used to stop before fading away (their fixed 3s life × the new faster rate is a larger total distance than the old fixed growth amount was) — a direct, expected consequence of switching from "grow to a target" to "grow continuously," not a separate change.
+
+Verification:
+- `npx tsc --noEmit` — zero errors, frontend
+- One combined temporary `window.__pulseDebug2` hook (removed after) captured radius/rotation/opacity for every live pulse (matched by Three.js `uuid` across samples, the same technique validated in earlier entries) across ~7s. This single capture rigorously confirmed all three changes at once: (a) growth rate measured at 0.557-0.626 units/s, consistent with the new ~0.583 units/s target (up from the previous ~0.477 units/s); (b) one specific pulse's opacity dropped from 0.350 → 0.294 (actively fading) between two samples while its radius *simultaneously* rose from 10.046 → 10.699 in that same window — direct proof growth does not freeze once fading begins, the core behavioral change requested; (c) rotation rate computed at ≈0.132 rad/s, close to the new `2π/45 ≈ 0.1396 rad/s` target and clearly below the previous ~0.17-0.24 rad/s range.
+- Idle/detected-state screenshot 6s in: the sphere cluster reads visibly larger/denser than in prior screenshots, consistent with faster, unbounded growth.
+
+Remaining manual steps: none. Dev servers still running — http://localhost:5173/ / http://localhost:3001.
+
+### 2026-08-03 — Floor: back-left edge lengthened 20%
+
+Request: increase the length of the edge at the left of the back corner by 20%. That's the BACK-to-LEFT edge (and its parallel FRONT-to-RIGHT edge) — `GROUND_SIZE_Z`, the dimension left untouched by the earlier back-to-right lengthening. 12 → 14.4 units (exactly 20%, an exact figure this time, not a tuned guess).
+
+Files touched:
+- `frontend/src/groundPlane.ts` — `GROUND_SIZE_Z` 12 → 14.4; the dot-grid spacing/count derivation (`DOT_SPACING`/`GRID_COUNT_X`) already reads `GROUND_SIZE_Z` reactively, so it needed no separate change
+- `DEMO_SPEC.md` — Ground plane bullet updated with the new 14.4-unit figure and its derivation
+
+Verification:
+- `npx tsc --noEmit` — zero errors, frontend
+- Added a temporary per-corner NDC console log (removed after) reusing the existing floor-corner-projection code already in `main.ts` (no new logic needed): the FRONT corner's overshoot grew from NDC y ≈ -1.06 to ≈ -1.21 (the front corner is already accepted as partially clipped per two entries ago) — a modest increase, not a large one — while the other three corners stayed comfortably on-screen (back ≈0.36, left ≈-0.63, right ≈0.63, all well within [-1, 1]). Flagged rather than re-tuning the camera again, since this request didn't ask for that and the overshoot is still small.
+- Idle-state screenshot: floor's diamond silhouette reads visibly wider/deeper along the back-left edge.
+
+Remaining manual steps: none. Dev servers still running — http://localhost:5173/ / http://localhost:3001.
+
+### 2026-08-03 — Continuous pulse: outer sphere retimed to fully fade before the second-innermost spawns
+
+Request: the outermost sphere must be fully faded away by the time the second-innermost site (index 3) spawns, and the timing of the other spheres adjusted accordingly. Asked whether "adjust the timing of other spheres accordingly" meant only compressing the outer sphere's own hold/fade split, or re-timing the whole cascade; user chose the latter, without specifying an exact target relationship, so this required an actual design, not just a number swap.
+
+The previous design (from two entries ago) held the outer sphere at full opacity until the INNERMOST site (index 4) spawned, then faded — but index 4 spawns *after* index 3, so under that design the outer sphere's fade couldn't even *start* until after the new deadline had already passed. Not fixable by shortening the fade alone; the hold trigger itself had to change.
+
+Files touched:
+- `frontend/src/continuousRipples.ts` — `OUTER_HOLD_DURATION_S` redefined from `(SITE_COUNT - 1) * STAGGER_S` (hold until site 4/innermost spawns) to `(SITE_COUNT - 3) * STAGGER_S` (hold until site 2/middle spawns); `OUTER_FADE_DURATION_S` redefined from `LIFE_S` (3s) to `STAGGER_S` (1s) — chosen so the fade finishes exactly when site 3 spawns, not an arbitrary shorter duration. Net effect: outer site's total life drops from ~7s to exactly `3 * STAGGER_S` = 3s, which happens to already equal sites 1-4's own `LIFE_S` — a deliberate, coherent re-timing (every one of the 5 pulses now shares the same 3s total lifespan) rather than an arbitrary new number for its own sake. Sites 1-4's own `LIFE_S`/`STAGGER_S` were left unchanged, since they already matched the new target once derived — there was nothing inconsistent left to adjust in them.
+- `DEMO_SPEC.md` — Continuous scanning pulse subsection's outer-site bullet rewritten around the new hold-until-site-2/fade-until-site-3 timing, explicitly noting why the old innermost-spawn trigger was incompatible with the new requirement
+
+Verification:
+- `npx tsc --noEmit` — zero errors, frontend
+- Added temporary spawn/remove event logging (removed after) and captured a full 12s run (>2 cascade periods): confirmed in every one of 3 consecutive cycles that the outer sphere's removal timestamp (3.158, 7.942, 13.061) is always at-or-before site 3's spawn timestamp (3.158, 8.101, 13.061) — never after — directly verifying the stated requirement holds consistently cycle over cycle, not just in the first instance.
+
+Remaining manual steps: none. Dev servers still running — http://localhost:5173/ / http://localhost:3001.
+
+### 2026-08-03 — Subject moved to the floor's center
+
+Request: the detected object should be around the center of the rectangular plane. Moved the subject from its original ~75%-toward-the-back-corner position (set in Sprint 8, unchanged through every subsequent sprint and this whole session) to the floor's exact center — a significant compositional change, since nearly every other element (the elevated scanning-source point the domes/sweep/continuous-pulse used to sit at, both ripple systems' death radius, the floor tint falloff) derives its position from the subject rather than being independently positioned.
+
+Files touched:
+- `frontend/src/main.ts` — `subjectPosition` simplified from a `SUBJECT_CORNER_FRACTION`-scaled offset toward the back corner to a flat `(0, 0, 0)`; the constant and its computation were removed entirely rather than left dangling at an unused value
+- `frontend/src/subject.ts` — header comment updated (was describing the far/back-corner position)
+- `DEMO_SPEC.md` — Subject bullet: position changed from "~70-80% toward the back corner... not floor center" to "at the CENTER of the floor" (the exact opposite of the old wording); Floor orientation bullet's reference to "the subject remains at its Sprint 8 position toward the back corner region" updated to point at the Subject bullet instead of restating a now-wrong position
+
+Everything downstream picked this up automatically with no further code changes needed, since it was already built to derive from `subjectPosition`/`subject.position` rather than hold an independent hardcoded position: the elevated scanning-source point (domes' old anchor, now the sweep's and continuous pulse's), both ripple systems' death-radius corner-distance calculation, and the floor's confidence-scaled tint falloff.
+
+Verification:
+- `npx tsc --noEmit` — zero errors, frontend
+- Idle-state screenshot: the sphere cluster and floor dot grid now read as centered on the floor's diamond silhouette, not offset toward one corner
+- Escalated/resolved-state screenshot: subject (visible, fading to resolved green), the pulse-sphere cluster, and a live floor ripple ring are all correctly centered together on the floor — confirms every dependent system re-centered correctly, not just the subject mesh itself
+
+Remaining manual steps: none for the code itself. This is a substantial composition change — worth a live look to confirm the overall balance (camera framing, dome-cluster-to-floor-edge proportions) still reads well now that the cluster sits center-floor rather than tucked toward one corner; not re-tuned as part of this change since it wasn't asked for and nothing looked obviously broken in the screenshots. Dev servers still running — http://localhost:5173/ / http://localhost:3001.
+
+### 2026-08-03 — Reverted: subject moved back to the back-corner position
+
+Request: undo the recent changes. Asked for scope, since "recent changes" could mean just the last edit or everything since the last GitHub push (several entries' worth) — user confirmed just the last one: the subject-centering change from the previous entry.
+
+Files touched (exact reversal of the previous entry, nothing broader):
+- `frontend/src/main.ts` — `subjectPosition` back to the `SUBJECT_CORNER_FRACTION`-scaled (~75% toward the back corner) computation
+- `frontend/src/subject.ts` — header comment reverted to describe the far/back-corner position
+- `DEMO_SPEC.md` — Subject bullet and Floor orientation bullet's subject-position reference both reverted to the back-corner wording; every other documentation update from today (outer-sphere retiming, back-left edge lengthening, growth-rate/rotation changes) was left untouched, since those weren't part of this undo
+
+Verification:
+- `git diff --stat` against the last pushed commit (848fda2) confirms `main.ts` and `subject.ts` now match it exactly (byte-for-byte on the parts that matter — their only net changes since the push were the ones just reverted), while `DEMO_SPEC.md` still shows the accumulated diff from every other change made today — confirms the revert was scoped precisely to the subject-centering change and nothing else leaked in or out
+- `npx tsc --noEmit` — zero errors, frontend
+- Idle-state screenshot: sphere cluster is back to sitting toward the back corner of the floor, matching the pre-centering composition
+
+Remaining manual steps: none. Dev servers still running — http://localhost:5173/ / http://localhost:3001.

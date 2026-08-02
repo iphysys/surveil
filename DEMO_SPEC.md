@@ -171,14 +171,15 @@ as a historical marker — not current behavior.
   tint within ~2x subject radius, fading to the structure color beyond
   that. Tint intensity scales with confidence. The floor is a rectangle,
   not a square: the edge running from the BACK corner to the RIGHT corner
-  (and its parallel, the FRONT-to-LEFT edge) is 18 units long; the other
-  pair of edges (BACK-to-LEFT, FRONT-to-RIGHT) stays at the original 12
-  units — lengthened per explicit request, no exact target given. Dot
-  spacing is uniform in both directions (not a stretched index grid) —
-  derived from a 32-dot baseline density along the shorter (Z) edge
-  (halved from an original 64, per explicit request for a less dense
-  grid), then applied along the longer (X) edge too, so dot count scales
-  with the rectangle's proportions rather than distorting spacing.
+  (and its parallel, the FRONT-to-LEFT edge) is 18 units long — lengthened
+  per explicit request, no exact target given. The edge running from the
+  BACK corner to the LEFT corner (and its parallel, the FRONT-to-RIGHT
+  edge) was originally 12 units, then lengthened by an explicit 20% to
+  14.4 units. Dot spacing is uniform in both directions (not a stretched
+  index grid) — derived from a 32-dot baseline density along the shorter
+  (Z) edge (halved from an original 64, per explicit request for a less
+  dense grid), then applied along the longer (X) edge too, so dot count
+  scales with the rectangle's proportions rather than distorting spacing.
 - Subject: a capsule (`THREE.CapsuleGeometry` or cylinder+spheres)
   positioned toward the FAR/BACK corner of the floor (~70-80% of the way
   toward the back corner along the diagonal, not floor center), emissive
@@ -282,26 +283,36 @@ detection event, so it runs in every state including idle, irrespective of
   of each sphere is what visually sits over the floor, so a fixed equator
   split stands in for genuine screen-space overlap detection.
 - Each site independently spawns its own pulse, which starts at that
-  site's own radius and grows outward by a further ~13.5% of the death
-  radius before fading (kept proportional — 90% — to the site spacing) —
-  a bounded, localized expansion around its site, not a grow-from-zero-
-  to-full-scale sweep
+  site's own radius and grows continuously at a constant rate (~5.5% of
+  the death radius per second — raised ~22% from an initial ~4.5%/s per
+  explicit request for "a bit" faster growth) for as long as the pulse
+  lives, right up until the instant it's fully faded away — growth never
+  stops early and holds at a fixed size, per explicit request
 - Spawn timing: sequential, outermost site first, then each site inward
   in turn, staggered ~1s apart. Once all 5 have spawned, the whole 5-site
   cascade repeats.
-- Sites 1-4 (all but the outermost) grow-while-fading over a shared
-  ~3s duration, as before. The OUTERMOST site is a special case per
-  explicit request: it keeps growing, without fading, until the
-  INNERMOST site has spawned (~4s later, matching the stagger above) —
-  only then does it hold its radius and fade out over a further ~3s. So
-  the outer sphere stays visible and expanding for the entire time the
-  rest of the cascade is spawning in, rather than fading independently on
-  its own fixed timer.
+- Sites 1-4 (all but the outermost) fade from the moment they spawn, over
+  a shared ~3s life (still growing throughout, per above). The OUTERMOST
+  site is a special case per explicit request: it stays at full opacity
+  — still growing the whole time — until the MIDDLE site (index 2) has
+  spawned (~2s later, matching the stagger above); only then does it
+  start fading, continuing to grow as it does, over exactly one further
+  stagger-interval (~1s) — finishing, fully faded and removed, precisely
+  when the SECOND-INNERMOST site (index 3) spawns. Per explicit request,
+  the outermost sphere must be completely gone (not just starting to
+  fade) by that point. Re-timed from an earlier version whose hold phase
+  ran until the innermost site spawned (~4s), which made the outer
+  sphere's fade only *start* after the second-innermost site had already
+  spawned — the opposite of this requirement, and impossible to satisfy
+  by tweaking the fade length alone. The outer sphere's total life (~3s)
+  now equals sites 1-4's own life, so all 5 sites share the same total
+  lifespan; the outer sphere is simply the only one that holds before
+  fading, rather than fading immediately.
 - Each sphere also spins slowly about its own vertical axis for as long as
-  it's alive (i.e. while it's growing/fading) — a full rotation takes ~30s,
-  far longer than a pulse's own ~3s lifetime, so each pulse only turns a
-  sliver of a rotation before it fades, reading as a near-imperceptible
-  drift rather than a spin
+  it's alive — a full rotation takes ~45s (slowed further from an initial
+  ~30s per explicit request), far longer than any pulse's lifetime, so
+  each pulse only turns a sliver of a rotation before it fades, reading as
+  a near-imperceptible drift rather than a spin
 - Style: thin wireframe stroke, a distinct "neon blue" (`#00D4FF`, defined
   in `palette.ts` as `CONTINUOUS_PULSE_HEX` — not yet folded into this
   spec's formal two-tone STRUCTURE/THREAT palette family in §5, flagged as
